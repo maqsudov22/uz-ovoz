@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="uz">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>uz-ovoz — matnni ovozga aylantirish</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #fff; --text: #1b1f24; --muted: #667085;
+    --line: #e3e6ea; --accent: #1a7f5a; --accent-text: #fff; --err: #c0392b;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #111418; --card: #1a1f25; --text: #e8eaed; --muted: #9aa3ad;
+      --line: #2c333b; --accent: #2fb380; --accent-text: #0b1410; --err: #ff6b5b;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  main { max-width: 720px; margin: 0 auto; padding: 32px 16px 48px; }
+  h1 { margin: 0 0 4px; font-size: 28px; }
+  .sub { margin: 0 0 24px; color: var(--muted); }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 20px; }
+  textarea {
+    width: 100%; min-height: 180px; resize: vertical; padding: 12px;
+    font: inherit; color: inherit; background: transparent;
+    border: 1px solid var(--line); border-radius: 10px;
+  }
+  textarea:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .count { text-align: right; font-size: 13px; color: var(--muted); margin-top: 4px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; margin: 16px 0; }
+  label { display: block; font-size: 14px; color: var(--muted); margin-bottom: 6px; }
+  select {
+    width: 100%; padding: 10px; font: inherit; color: inherit;
+    background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+  }
+  input[type=range] { width: 100%; accent-color: var(--accent); }
+  button {
+    width: 100%; padding: 14px; font: inherit; font-weight: 600; cursor: pointer;
+    background: var(--accent); color: var(--accent-text); border: 0; border-radius: 10px;
+  }
+  button:disabled { opacity: .6; cursor: wait; }
+  #result { margin-top: 20px; display: none; }
+  audio { width: 100%; }
+  #download { display: inline-block; margin-top: 10px; color: var(--accent); font-weight: 600; }
+  #error { color: var(--err); margin-top: 12px; min-height: 1em; }
+</style>
+</head>
+<body>
+<main>
+  <h1>uz-ovoz</h1>
+  <p class="sub">Oʻzbekcha matnni ovozga aylantiring. Lotin va kirill yozuvi ishlaydi.</p>
+
+  <div class="card">
+    <textarea id="text" maxlength="5000" placeholder="Matnni shu yerga yozing...">Assalomu alaykum! Bu oʻzbek tilidagi matnni ovozga aylantiruvchi dastur.</textarea>
+    <div class="count"><span id="count">0</span> / 5000</div>
+
+    <div class="grid">
+      <div>
+        <label for="voice">Ovoz</label>
+        <select id="voice">
+          <option value="madina">Madina (ayol)</option>
+          <option value="sardor">Sardor (erkak)</option>
+        </select>
+      </div>
+      <div>
+        <label for="rate">Tezlik: <span id="rateVal">0%</span></label>
+        <input id="rate" type="range" min="-50" max="100" step="5" value="0">
+      </div>
+      <div>
+        <label for="pitch">Ohang: <span id="pitchVal">0 Hz</span></label>
+        <input id="pitch" type="range" min="-50" max="50" step="5" value="0">
+      </div>
+    </div>
+
+    <button id="go">🔊 Ovozga aylantirish</button>
+    <div id="error" role="alert"></div>
+
+    <div id="result">
+      <audio id="player" controls></audio>
+      <a id="download" download="uz-ovoz.mp3">⬇ MP3 yuklab olish</a>
+    </div>
+  </div>
+</main>
+<script>
+  const $ = (id) => document.getElementById(id);
+  const sign = (v) => (v > 0 ? "+" : "") + v;
+  const updateCount = () => ($("count").textContent = $("text").value.length);
+  $("text").addEventListener("input", updateCount);
+  $("rate").addEventListener("input", (e) => ($("rateVal").textContent = sign(e.target.value) + "%"));
+  $("pitch").addEventListener("input", (e) => ($("pitchVal").textContent = sign(e.target.value) + " Hz"));
+  updateCount();
+
+  let lastUrl = null;
+  $("go").addEventListener("click", async () => {
+    const text = $("text").value.trim();
+    $("error").textContent = "";
+    if (!text) { $("error").textContent = "Matn kiriting."; return; }
+    const btn = $("go");
+    btn.disabled = true; btn.textContent = "Tayyorlanmoqda...";
+    try {
+      const res = await fetch("/api/tts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text, voice: $("voice").value,
+          rate: +$("rate").value, pitch: +$("pitch").value,
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(typeof err.detail === "string" ? err.detail : "Xatolik yuz berdi");
+      }
+      const blob = await res.blob();
+      if (lastUrl) URL.revokeObjectURL(lastUrl);
+      lastUrl = URL.createObjectURL(blob);
+      $("player").src = lastUrl;
+      $("download").href = lastUrl;
+      $("result").style.display = "block";
+      $("player").play().catch(() => {});
+    } catch (e) {
+      $("error").textContent = e.message;
+    } finally {
+      btn.disabled = false; btn.textContent = "🔊 Ovozga aylantirish";
+    }
+  });
+</script>
+</body>
+</html>
